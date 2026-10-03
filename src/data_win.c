@@ -2821,7 +2821,7 @@ DataWin* DataWin_parse(const char* filePath, DataWinParserOptions options) {
     // Use a large read buffer to reduce the number of physical reads
     // This is critical for slow I/O devices like the PS2 CDVD drive, where each fread
     // call would otherwise trigger a separate disc read of just a few sectors
-    setvbuf(file, nullptr, _IOFBF, 128 * 1024);
+    setvbuf(file, nullptr, _IOFBF, 4 * 1024);
 
     fseek(file, 0, SEEK_END);
     long fileSizeRaw = ftell(file);

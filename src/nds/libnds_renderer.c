@@ -214,6 +214,12 @@ static void libndsDrawSprite(Renderer *renderer, int32_t tpagIndex, float x, flo
     int texH = 0;
     const u16* TexturePagePixels = GetPixelData(lbds, tpag->texturePageId, &texW, &texH);
 
+    //Failed to load the texture page
+    if (!TexturePagePixels){
+        //logError("FAILED TO LOAD TEXTURE PAGE PIXELS! skipping drawing...\n"); //Make this draw a square later and only print once, never again
+        return;
+    }
+
     //Draw all pixle data from GetPixelData on screen
 	for (int sy = sy0; sy < sy2; sy++)
 	{

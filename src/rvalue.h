@@ -12,6 +12,10 @@
 #include "utils.h"
 #include "wad_versions.h"
 
+//String chunks start and end
+extern const char* g_strgStart;
+extern const char* g_strgEnd;
+
 // Forward declarations
 struct GMLArray;
 typedef struct GMLArray GMLArray;
@@ -263,6 +267,10 @@ static inline RValue RValue_makeAssetRef(int32_t assetIndex, uint8_t assetType) 
 // The caller's original RValue is unaffected and must still be freed normally.
 static inline RValue RValue_makeIndependent(RValue val) {
     if (val.type == RVALUE_STRING && val.string != nullptr) {
+        if (val.string >= g_strgStart && val.string < g_strgEnd){
+            val.ownsReference = false;
+            return val;
+        }
         return RValue_makeOwnedString(safeStrdup(val.string));
     } else if (val.type == RVALUE_ARRAY && val.array != nullptr) {
         GMLArray_incRef(val.array);

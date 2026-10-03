@@ -3912,6 +3912,10 @@ RValue VM_callCodeIndex(VMContext* ctx, int32_t codeIndex, RValue* args, int32_t
     require(codeIndex >= 0 && ctx->dataWin->code.count > (uint32_t) codeIndex);
     CodeEntry* code = &ctx->dataWin->code.entries[codeIndex];
 
+    //If the code is empty skip it
+    if (code->length == 0)
+        return RValue_makeUndefined();
+
     // Save current frame
     CallFrame frame = {0};
     frame.savedIP = ctx->ip;

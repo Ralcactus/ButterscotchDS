@@ -2794,6 +2794,10 @@ void DataWin_loadCodeIfNeeded(DataWin* dw, uint32_t codeId) {
         return;
     }
 
+    //Already loaded
+    if (e->bytecodeData != nullptr)
+        return;
+
     e->bytecodeData = (uint8_t *)safeMalloc(e->length);
     long oldSeek = ftell(dw->lazyLoadFile);
     fseek(dw->lazyLoadFile, e->bytecodeAbsoluteOffset, SEEK_SET);
@@ -2802,6 +2806,10 @@ void DataWin_loadCodeIfNeeded(DataWin* dw, uint32_t codeId) {
 }
 
 // ===[ MAIN PARSE FUNCTION ]===
+
+//String chunks start and end (pulls from rvalue.h)
+const char* g_strgStart = nullptr;
+const char* g_strgEnd = nullptr;
 
 DataWin* DataWin_parse(const char* filePath, DataWinParserOptions options) {
     FILE* file = fopen(filePath, "rb");
@@ -2885,6 +2893,10 @@ DataWin* DataWin_parse(const char* filePath, DataWinParserOptions options) {
                 dw->strgBuffer = dw->mappedFile + chunkDataStart;
             else
                 dw->strgBuffer = BinaryReader_readBytesAt(&reader, chunkDataStart, chunkLength);
+
+            //Asign string local
+            g_strgStart = (const char*) dw->strgBuffer;
+            g_strgEnd = g_strgStart + chunkLength;
         }
 
         if ((memcmp(chunkName, "CODE", 4) == 0) && chunkLength > 0) {

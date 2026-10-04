@@ -847,6 +847,13 @@ int loop(CommandLineArgs args, const char *argv0) {
             return 0;
         }
 #endif
+#ifndef ENABLE_NOOP_RENDERER
+        if (gfx == NOOP) {
+            logError("The noop renderer is not available in this build!\n");
+            return 0;
+        }
+#endif
+
 #ifdef ENABLE_SCREENSHOTS
         if (gfx != MODERN_GL && hmlen(args.screenshotSurfacesFrames)) {
             logError("You can only use --screenshot-surfaces with the modern gl renderer!\n");

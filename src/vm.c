@@ -32,14 +32,103 @@ static int patchCmp(const void* a, const void* b) {
     return (x > y) - (x < y);
 }
 
+static size_t cacheLowerBound(const PatchRec* p, size_t patchCount, uint32_t addr) {
+    size_t bottom = 0;
+    size_t top = patchCount;
+    while (bottom < top){
+        size_t mid = (bottom + top) / 2;
+        if (p[mid].addr < addr)
+            bottom = mid + 1;
+        else
+            top = mid;
+    }
+    
+    return bottom;
+}
+
+typedef struct {
+    uint32_t magic;
+    uint32_t blobSize;
+    uint32_t gameID;
+    uint32_t codeCount;
+    uint32_t patchCount;
+} PatchCacheHeader;
+
+static bool cacheLoad(VMContext* ctx){
+    DataWin* dw = ctx->dataWin;
+    FILE* CacheFile = fopen("sd:/butterscotch_patches.bin", "rb");
+
+    //Failed to open the cache file
+    if (!CacheFile)
+        return false;
+
+    PatchCacheHeader h;
+    uint32_t codeCount = dw->code.count;
+    uint32_t* firstPatch = nullptr;
+    uint32_t* endPatch = nullptr;
+
+    //Validate the cache file
+    if (fread(&h, sizeof h, 1, CacheFile) != 1 || h.magic != 0x4452454Eu || h.blobSize != (uint32_t)dw->bytecodeBlobSize || h.gameID != (uint32_t)dw->gen8.gameID || h.codeCount != codeCount) {
+        fclose(CacheFile);
+        return false;
+    }
+
+    firstPatch = (uint32_t*)malloc(codeCount * 4);
+    endPatch = (uint32_t*)malloc(codeCount * 4);
+
+    if (fread(firstPatch, 4, codeCount, CacheFile) != codeCount || fread(endPatch, 4, codeCount, CacheFile) != codeCount) {
+        free(firstPatch);
+        free(endPatch);
+        fclose(CacheFile);
+        return false;
+    }
+
+    ctx->cacheFirst = firstPatch;
+    ctx->cacheEnd = endPatch;
+    ctx->cacheFile = CacheFile;
+    ctx->cacheFileBase = sizeof(PatchCacheHeader) + codeCount * 8;
+    return true;
+}
+
+static bool cacheSave(VMContext* ctx) {
+    DataWin* dw = ctx->dataWin;
+    uint32_t codecount = dw->code.count;
+    uint32_t* firstPatch = (uint32_t*)malloc(codecount * 4);
+    uint32_t* endPatch = (uint32_t*)malloc(codecount * 4);
+
+    for (uint32_t i = 0; i < codecount; i++){
+        CodeEntry* c = &dw->code.entries[i];
+        firstPatch[i] = cacheLowerBound(ctx->patches, ctx->patchCount, (uint32_t)c->bytecodeAbsoluteOffset);
+        endPatch[i] = cacheLowerBound(ctx->patches, ctx->patchCount, (uint32_t)(c->bytecodeAbsoluteOffset + c->length));
+    }
+
+    FILE* CacheFile = fopen("sd:/butterscotch_patches.bin", "wb");
+
+    //Failed to load cache file
+    if (!CacheFile){
+        free(firstPatch);
+        free(endPatch);
+        return false;
+    }
+
+    //file metadata (format id (NERD), the bytecode blob size, the gameID, the code count, and cached code count)
+    PatchCacheHeader header = { 0x4452454Eu, (uint32_t)dw->bytecodeBlobSize, (uint32_t)dw->gen8.gameID, codecount, (uint32_t)ctx->patchCount };
+
+    fwrite(&header, sizeof(header), 1, CacheFile); //Write metadata/header
+    fwrite(firstPatch, 4, codecount, CacheFile);
+    fwrite(endPatch, 4, codecount, CacheFile);
+    fwrite(ctx->patches, sizeof(PatchRec), ctx->patchCount, CacheFile);
+
+    fclose(CacheFile);
+    free(firstPatch);
+    free(endPatch);
+    return cacheLoad(ctx);
+}
+
 static const uint8_t* getCodeBase(VMContext* ctx, int32_t codeIndex) {
     DataWin* dw = ctx->dataWin;
     CodeEntry* c = &dw->code.entries[codeIndex];
 
-    if (!dw->lazyLoadCode || dw->mappedFile || dw->bytecodeBuffer != nullptr)
-        return dw->bytecodeBuffer + (c->bytecodeAbsoluteOffset - dw->bytecodeBufferBase);
-
-    
     bool fresh = false;
     if (c->bytecodeData == nullptr)
         fresh = true;
@@ -47,17 +136,38 @@ static const uint8_t* getCodeBase(VMContext* ctx, int32_t codeIndex) {
     DataWin_loadCodeIfNeeded(dw, codeIndex);
     const uint8_t* bytes = c->bytecodeData;
     if (fresh && bytes){
-        size_t lo = 0;
-        size_t hi = ctx->patchCount;
-        while (lo < hi){
-            size_t mid = (lo + hi) / 2;
-            if (ctx->patches[mid].addr < c->bytecodeAbsoluteOffset)
-                lo = mid + 1;
-            else
-                hi = mid;
+        if (ctx->cacheFile){
+            uint32_t first = ctx->cacheFirst[codeIndex];
+            uint32_t end = ctx->cacheEnd[codeIndex];
+            PatchRec buf[256];
+
+            fseek(ctx->cacheFile, ctx->cacheFileBase + (long)first * sizeof(PatchRec), SEEK_SET);
+
+            while (first < end){
+                size_t chunk = end - first > 256 ? 256 : end - first;
+
+                if (fread(buf, sizeof(PatchRec), chunk, ctx->cacheFile) != chunk)
+                    break;
+
+                for (size_t i = 0; i < chunk; i++)
+                    BinaryUtils_writeUint32(&bytes[buf[i].addr - c->bytecodeAbsoluteOffset], buf[i].value);
+
+                first += chunk;
+            }
         }
-        for (; lo < ctx->patchCount && ctx->patches[lo].addr < c->bytecodeAbsoluteOffset + c->length; lo++)
-            BinaryUtils_writeUint32(&bytes[ctx->patches[lo].addr - c->bytecodeAbsoluteOffset], ctx->patches[lo].value);
+        else {
+            size_t bottom = 0;
+            size_t top = ctx->patchCount;
+            while (bottom < top){
+                size_t mid = (bottom + top) / 2;
+                if (ctx->patches[mid].addr < c->bytecodeAbsoluteOffset)
+                    bottom = mid + 1;
+                else
+                    top = mid;
+            }
+            for (; bottom < ctx->patchCount && ctx->patches[bottom].addr < c->bytecodeAbsoluteOffset + c->length; bottom++)
+                BinaryUtils_writeUint32(&bytes[ctx->patches[bottom].addr - c->bytecodeAbsoluteOffset], ctx->patches[bottom].value);
+        }
     }
     
     return bytes;
@@ -3622,21 +3732,31 @@ VMContext* VM_create(DataWin* dataWin) {
 
     //Lazy load code create look up map
     if (dataWin->lazyLoadCode){
-        size_t totalPatches = 0;
-        repeat(dataWin->vari.variableCount, i)
-            totalPatches += dataWin->vari.variables[i].occurrences;
-        repeat(dataWin->func.functionCount, i)
-            totalPatches += dataWin->func.functions[i].occurrences;
+        if (!cacheLoad(ctx)){
+            size_t totalPatches = 0;
 
-        arrsetcap(ctx->patches, totalPatches);
+            repeat(dataWin->vari.variableCount, i)
+                totalPatches += dataWin->vari.variables[i].occurrences;
 
-        uint8_t* tmp = (uint8_t*) safeMalloc(dataWin->bytecodeBlobSize);
-        fseek(dataWin->lazyLoadFile, (long) dataWin->bytecodeBufferBase, SEEK_SET);
-        fread(tmp, 1, dataWin->bytecodeBlobSize, dataWin->lazyLoadFile);
-        patchReferenceOperands(ctx, tmp, dataWin->bytecodeBufferBase, true);
-        free(tmp);
-        ctx->patchCount = arrlen(ctx->patches);
-        qsort(ctx->patches, ctx->patchCount, sizeof(PatchRec), patchCmp);
+            repeat(dataWin->func.functionCount, i)
+                totalPatches += dataWin->func.functions[i].occurrences;
+
+            arrsetcap(ctx->patches, totalPatches);
+
+            uint8_t* tmp = (uint8_t*) safeMalloc(dataWin->bytecodeBlobSize);
+            fseek(dataWin->lazyLoadFile, (long) dataWin->bytecodeBufferBase, SEEK_SET);
+            fread(tmp, 1, dataWin->bytecodeBlobSize, dataWin->lazyLoadFile);
+
+            patchReferenceOperands(ctx, tmp, dataWin->bytecodeBufferBase, true);
+
+            free(tmp);
+
+            ctx->patchCount = arrlen(ctx->patches);
+            qsort(ctx->patches, ctx->patchCount, sizeof(PatchRec), patchCmp);
+
+            if (cacheSave(ctx))
+                arrfree(ctx->patches);
+        }
     }
     else
         patchReferenceOperands(ctx, dataWin->bytecodeBuffer, dataWin->bytecodeBufferBase, false);

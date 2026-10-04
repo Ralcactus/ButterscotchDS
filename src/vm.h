@@ -309,6 +309,11 @@ struct VMContext {
 
     PatchRec* patches;
     size_t patchCount;
+
+    uint32_t* cacheFirst;
+    uint32_t* cacheEnd;
+    FILE* cacheFile;
+    long cacheFileBase;
 };
 
 // ===[ Public API ]===

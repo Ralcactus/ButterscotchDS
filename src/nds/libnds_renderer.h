@@ -88,9 +88,9 @@ typedef struct {
     TileEntryMap* tileEntryMap; // stb_ds hashmap: (bgDef, srcX, srcY, srcW, srcH) -> AtlasTileEntry*
 
     //Texture page cache
-    uint16_t *texPixels[16];
-    int32_t texW[16];
-    int32_t texH[16];
+    uint16_t** texPixels;
+    int* texW;
+    int* texH;
 
     // GPU state shadows (returned by getters, mutated by setters)
     bool blendEnable;

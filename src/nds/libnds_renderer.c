@@ -103,6 +103,14 @@ static void libndsBeginView(Renderer *renderer, int32_t viewX, int32_t viewY, in
     //Set current viewport size
     lbds->viewX = viewX;
     lbds->viewY = viewY;
+
+    //Set current viewport size
+    lbds->scaleX = (float)DS_SCREEN_WIDTH / (float)viewW;
+    lbds->scaleY = (float)DS_SCREEN_HEIGHT / (float)viewH;
+
+    //Set current viewport offset
+    lbds->offsetX = portX;
+    lbds->offsetY = portY;
 }
 
 static void libndsEndView(Renderer *renderer) {}
@@ -260,7 +268,7 @@ static void libndsDrawSprite(Renderer *renderer, int32_t tpagIndex, float x, flo
             continue;
 
         //logInfo("hi\n");
-		int srcY = (int)((sy - sy0) / yscale);
+		int srcY = (int)((sy - sy0) / (yscale * lbds->scaleY));
         const u16* src = TexturePagePixels + srcY * texW;
 		u16* dst = backbuffer + sy * DS_SCREEN_WIDTH;
 
@@ -270,7 +278,7 @@ static void libndsDrawSprite(Renderer *renderer, int32_t tpagIndex, float x, flo
             if (!(sx >= 0 && sx < DS_SCREEN_WIDTH))
                 continue;
 
-            int srcX = (int)((sx - sx0) / xscale);
+            int srcX = (int)((sx - sx0) / (xscale * lbds->scaleX));
             u16 c = src[srcX];
             if (c & BIT(15))   // opaque
                 dst[sx] = c;

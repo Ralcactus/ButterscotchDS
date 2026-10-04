@@ -75,7 +75,7 @@ int main(int argc, char* argv[]){
     args.osType = OS_WINDOWS;
     args.profilerFramesBetween = 0;
     args.dataWinPath = "nitro:/data.win";
-    args.saveFolder = "";
+    args.saveFolder = "sd:";
     args.lazyTextures = true;
     args.lazyRooms = true;
     args.lazyAudio = true;

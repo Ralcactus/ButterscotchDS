@@ -73,6 +73,10 @@
 #include "vita_textures.h"
 #endif
 
+#ifdef PLATFORM_NDS
+#include "libnds_input.h"
+#endif
+
 enum GraphicsAPI gfx;
 
 #if defined(ENABLE_LEGACY_GL) || defined(ENABLE_MODERN_GL)
@@ -843,13 +847,6 @@ int loop(CommandLineArgs args, const char *argv0) {
             return 0;
         }
 #endif
-#ifndef ENABLE_NOOP_RENDERER
-        if (gfx == NOOP) {
-            logError("The noop renderer is not available in this build!\n");
-            return 0;
-        }
-#endif
-
 #ifdef ENABLE_SCREENSHOTS
         if (gfx != MODERN_GL && hmlen(args.screenshotSurfacesFrames)) {
             logError("You can only use --screenshot-surfaces with the modern gl renderer!\n");
@@ -1090,6 +1087,8 @@ while (true){};
             // Clear last frame's pressed/released state, then poll new input events
             RunnerKeyboard_beginFrame(runner->keyboard);
             RunnerGamepad_beginFrame(runner->gamepads);
+            HandleNDSInput(runner->keyboard);
+
             RunnerMouse_beginFrame(runner->mouse);
             if (platformHandleEvents()) {
                 shouldWindowClose = true;

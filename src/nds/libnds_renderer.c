@@ -312,9 +312,17 @@ static void libndsDrawRectangleColor(Renderer *renderer, float x1, float y1, flo
 
     //} else {
         u16 c = RGB15(r >> 3, g >> 3, b >> 3) | BIT(15);
-        for (int yy = (int)sy1; yy < (int)sy2; yy++)
-            for (int xx = (int)sx1; xx < (int)sx2; xx++)
+        for (int yy = (int)sy1; yy < (int)sy2; yy++){
+            if (yy < 0 || yy >= DS_SCREEN_HEIGHT)
+                continue;
+
+            for (int xx = (int)sx1; xx < (int)sx2; xx++){
+                if (xx < 0 || xx >= DS_SCREEN_WIDTH)
+                    continue;
+
                 backbuffer[yy * DS_SCREEN_WIDTH + xx] = c;
+            }
+        }
     //}
 }
 

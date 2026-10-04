@@ -291,13 +291,46 @@ static void libndsDrawSprite(Renderer *renderer, int32_t tpagIndex, float x, flo
 static void libndsDrawSpritePart(Renderer *renderer, int32_t tpagIndex, int32_t srcOffX, int32_t srcOffY, int32_t srcW, int32_t srcH, float x, float y, float xscale, float yscale, float angleDeg, float pivotX, float pivotY, uint32_t color, float alpha) {}
 static void libndsDrawSpritePartColor(Renderer *renderer, int32_t tpagIndex, int32_t srcOffX, int32_t srcOffY, int32_t srcW, int32_t srcH, float x, float y, float xscale, float yscale, float angleDeg, float pivotX, float pivotY, uint32_t color1, uint32_t color2, uint32_t color3, uint32_t color4, float alpha) {}
 static void libndsDrawSpritePos(Renderer *renderer, int32_t tpagIndex, float x1, float y1, float x2, float y2, float x3, float y3, float x4, float y4, float alpha) {}
-static void libndsDrawRectangle(Renderer *renderer, float x1, float y1, float x2, float y2, uint32_t color, float alpha, bool outline) {}
-static void libndsDrawRectangleColor(Renderer *renderer, float x1, float y1, float x2, float y2, uint32_t color1, uint32_t color2, uint32_t color3, uint32_t color4, float alpha, bool outline) {}
+
+//Not acurate but does well enough for now (should do shading between the rect transitioning the colours)
+static void libndsDrawRectangleColor(Renderer *renderer, float x1, float y1, float x2, float y2, uint32_t color1, uint32_t color2, uint32_t color3, uint32_t color4, float alpha, bool outline){
+    LibNDSRenderer* lbds = (LibNDSRenderer*)renderer;
+
+    uint8_t r = BGR_R(color1);
+    uint8_t g = BGR_G(color1);
+    uint8_t b = BGR_B(color1);
+    uint8_t a = alpha; //alphaToGS(alpha);
+
+    float sx1 = (x1 - (float) lbds->viewX) * lbds->scaleX + lbds->offsetX;
+    float sy1 = (y1 - (float) lbds->viewY) * lbds->scaleY + lbds->offsetY;
+    float sx2 = (x2 - (float) lbds->viewX) * lbds->scaleX + lbds->offsetX;
+    float sy2 = (y2 - (float) lbds->viewY) * lbds->scaleY + lbds->offsetY;
+
+    //u64 rectColor = GS_SETREG_RGBAQ(r, g, b, a, 0x00);
+
+    //if (outline) {
+
+    //} else {
+        u16 c = RGB15(r >> 3, g >> 3, b >> 3) | BIT(15);
+        for (int yy = (int)sy1; yy < (int)sy2; yy++)
+            for (int xx = (int)sx1; xx < (int)sx2; xx++)
+                backbuffer[yy * DS_SCREEN_WIDTH + xx] = c;
+    //}
+}
+
+static void libndsDrawRectangle(Renderer *renderer, float x1, float y1, float x2, float y2, uint32_t color, float alpha, bool outline){
+    libndsDrawRectangleColor(renderer, x1, y1, x2, y2, color, color, color, color, alpha, outline); //Pass to the color drawer
+}
+
 static void libndsDrawLine(Renderer *renderer, float x1, float y1, float x2, float y2, float width, uint32_t color, float alpha) {}
 static void libndsDrawLineColor(Renderer *renderer, float x1, float y1, float x2, float y2, float width, uint32_t color1, uint32_t color2, float alpha) {}
 static void libndsDrawTriangle(Renderer *renderer, float x1, float y1, float x2, float y2, float x3, float y3, uint32_t color1, uint32_t color2, uint32_t color3, float alpha, bool outline) {}
-static void libndsDrawText(Renderer *renderer, const char *text, float x, float y, float xscale, float yscale, float angleDeg, float lineSeparation) {}
-static void libndsDrawTextColor(Renderer *renderer, const char *text, float x, float y, float xscale, float yscale, float angleDeg, int32_t c1, int32_t c2, int32_t c3, int32_t c4, float alpha, float lineSeparation) {}
+static void libndsDrawTextColor(Renderer *renderer, const char *text, float x, float y, float xscale, float yscale, float angleDeg, int32_t c1, int32_t c2, int32_t c3, int32_t c4, float alpha, float lineSeparation){
+    libndsDrawRectangle(renderer, x, y, x + 10, y + 10, c1, alpha, false); //Draw text as as placeholder squares
+}
+static void libndsDrawText(Renderer *renderer, const char *text, float x, float y, float xscale, float yscale, float angleDeg, float lineSeparation){
+    libndsDrawTextColor(renderer, text, x, y, xscale, yscale, angleDeg, renderer->drawColor, renderer->drawColor, renderer->drawColor, renderer->drawColor, renderer->drawAlpha, lineSeparation);
+}
 static void libndsFlush(Renderer *renderer) {}
 static void libndsClearScreen(Renderer *renderer, uint32_t color, float alpha) {}
 

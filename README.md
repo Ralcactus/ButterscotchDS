@@ -6,13 +6,15 @@ This project use's makefiles because I HATE CMAKE WITH EVERY CELL OF MY BODY<br>
 just run make in the root and if you have devkitpro correctly setup, compile fine!
 
 ## Current progress
-- Super basic data win with just a sprite moving runs
-- ... thats basically it
+- Undertale boots and runs up until the name select
+- Inputs
+- Basic sprite renderer
+- Pre-processer works
 
 ## TO-DO (Highest to lowest priorty)
 - ~~Get undertale booting~~ ✔
-- Get undertale to the first room (currently gets stuck at "Loaded "UNDERTALE")
+- ~~Get undertale to the first room (currently gets stuck at "Loaded "UNDERTALE")~~ ✔
+- ~~Create a pre-processer (currently you have to dump each texture page yourself via utmt)~~ ✔
 - Write/finish the full ndslib render backend
-- Create a pre-processer (currently you have to dump each texture page yourself via utmt)
-- Get deltarune booting (untested)
+- Get deltarune booting (fails with due to i think lazycode?)
 - Write the full ndslib audio backend

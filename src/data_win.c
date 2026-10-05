@@ -2620,6 +2620,14 @@ static void parseSTRG(BinaryReader* reader, DataWin* dw) {
 
 static void resolveExternalTextures(BinaryReader* reader, DataWin* dw) {
     if (!dw->tginOffset || !dw->txtr.textures) return;
+
+    BinaryReader fileReader;
+    BinaryReader* reader = mainReader;
+    if (mainReader->buffer != nullptr && (dw->tginOffset < mainReader->bufferBase || dw->tginOffset >= mainReader->bufferBase + mainReader->bufferSize)) {
+        fileReader = BinaryReader_create(mainReader->file, mainReader->fileSize);
+        reader = &fileReader;
+    }
+
     BinaryReader_seek(reader, dw->tginOffset);
     uint32_t version = BinaryReader_readUint32(reader);
     if (version != 1) return;

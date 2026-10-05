@@ -14,6 +14,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include "nds_image.h"
+#include <sys/stat.h>
 
 static u16* framebuffer = NULL;   // VRAM
 static u16* backbuffer  = NULL;   // main RAM
@@ -134,7 +135,15 @@ static const u16* GetPixelData(LibNDSRenderer *lbds, int32_t texturePageId, int 
     if (!lbds->texPixels[texturePageId]){
         //Create path
         char path[64];
-        snprintf(path, sizeof(path), "nitro:/sprites/%s.bin", tpagToName[texturePageId]); //For example nitro:/sprites/spr_maincharau.bin
+        
+        //Load from nitro if there, else load from sd
+        struct stat buffer;
+        if (stat("nitro:/sprites", &buffer) == 0){
+            snprintf(path, sizeof(path), "nitro:/sprites/%s.bin", tpagToName[texturePageId]); //For example nitro:/sprites/spr_maincharau.bin
+        }
+        else
+            snprintf(path, sizeof(path), "sd:/NDS/butterscotch/sprites/%s.bin", tpagToName[texturePageId]); //For example sd:/NDS/Butterscotch/sprites/spr_maincharau.bin
+        
         uint16_t* PixelData = NULL;
         int w = 0;
         int h = 0;

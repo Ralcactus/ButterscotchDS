@@ -8,6 +8,7 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <errno.h>
+#include <sys/stat.h>
 
 static FILE* logFile = NULL;
 
@@ -74,8 +75,15 @@ int main(int argc, char* argv[]){
     args.fastForwardSpeed = 0.0;
     args.osType = OS_WINDOWS;
     args.profilerFramesBetween = 0;
-    args.dataWinPath = "nitro:/data.win";
-    args.saveFolder = "sd:";
+
+    //Load from nitro if it exists, else load from sd
+    struct stat buffer;
+    if (stat("nitro:/data.win", &buffer) == 0)
+        args.dataWinPath = "nitro:/data.win";
+    else
+        args.dataWinPath = "sd:/NDS/butterscotch/data.win";
+
+    args.saveFolder = "sd:/NDS/butterscotch/";
     args.lazyTextures = true;
     args.lazyRooms = true;
     args.lazyAudio = true;

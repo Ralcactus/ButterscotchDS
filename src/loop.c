@@ -1094,7 +1094,6 @@ while (true){};
             // Clear last frame's pressed/released state, then poll new input events
             RunnerKeyboard_beginFrame(runner->keyboard);
             RunnerGamepad_beginFrame(runner->gamepads);
-            HandleNDSInput(runner->keyboard);
 
             RunnerMouse_beginFrame(runner->mouse);
             if (platformHandleEvents()) {

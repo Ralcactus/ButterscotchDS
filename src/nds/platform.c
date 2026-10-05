@@ -10,9 +10,6 @@ static Runner* g_runner = NULL;
 static int32_t g_width = 256;
 static int32_t g_height = 192;
 
-
-// Initialise the DS "platform".
-// Rendering itself is currently handled by NoopRenderer.
 bool platformInit(int32_t reqW, int32_t reqH, const char* title, bool headless){
     (void)reqW;
     (void)reqH;
@@ -64,13 +61,11 @@ void platformSetWindowSize(int32_t width, int32_t height){
 
 
 void platformSetWindowTitle(const char* title){
-    // No window title on Nintendo DS.
     (void)title;
 }
 
 
 void platformGetMousePos(double* xPos, double* yPos){
-    // No mouse support yet.
     if (xPos)
         *xPos = 0.0;
 
@@ -80,25 +75,44 @@ void platformGetMousePos(double* xPos, double* yPos){
 
 
 void platformSwapBuffers(void) {
-    // No rendering yet.
-    // NoopRenderer handles rendering calls.
 }
 
 
 void* platformGetProcAddress(const char* name){
-    // No OpenGL / dynamic graphics API.
     (void)name;
 
     return NULL;
 }
 
 
-bool platformHandleEvents(void){
-    // No controls yet.
-    //
-    // Returning false means:
-    // "Keep running, don't close the application."
+typedef struct {
+    u32 mask;
+    int32_t gmlKey;
+} keymap;
 
+static const keymap keymapvar[] = {
+    { KEY_A, 'Z' }, //CONFIRM
+    { KEY_B, 'X' }, //BACK
+    { KEY_X | KEY_Y, 'C' }, //MENU
+    { KEY_LEFT, VK_LEFT  }, //LEFT
+    { KEY_RIGHT, VK_RIGHT }, //RIGHT
+    { KEY_UP, VK_UP    }, //UP
+    { KEY_DOWN, VK_DOWN  }, //DOWN
+};
+
+bool platformHandleEvents(void) {
+    scanKeys();
+    u32 pressed  = keysDown();
+    u32 released = keysUp();
+
+    for (size_t i = 0; i < sizeof(keymapvar) / sizeof(keymapvar[0]); i++){
+        if (pressed & keymapvar[i].mask)
+            RunnerKeyboard_onKeyDown(g_runner->keyboard, keymapvar[i].gmlKey);
+
+        if (released & keymapvar[i].mask)
+            RunnerKeyboard_onKeyUp(g_runner->keyboard, keymapvar[i].gmlKey);
+    }
+    
     return false;
 }
 

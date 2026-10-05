@@ -154,7 +154,7 @@ static const u16* GetPixelData(LibNDSRenderer *lbds, int32_t texturePageId, int 
         texCacheBytes += (size_t)w * h * 2;
 
         //If we're over the max amount, unload textures until we're good
-        while (texCacheBytes > (64*1024)){
+        while (texCacheBytes > (32*1024)){
             int victim = -1; //Which entry is being killed
 
             for (int i = 0; i < (int)texPageCount; i++){

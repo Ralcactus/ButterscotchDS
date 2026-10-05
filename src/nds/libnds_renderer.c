@@ -9,10 +9,10 @@
 
 #include <stdlib.h>
 #include <string.h>
-#include <math.h>
 
 #include <nds.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include "nds_image.h"
 #include <sys/stat.h>
 
@@ -20,13 +20,13 @@ static u16* framebuffer = NULL;   // VRAM
 static u16* backbuffer  = NULL;   // main RAM
 static const char** tpagToName = NULL;
 static int* tpagToFrame = NULL;
+static int lastTexturePageId = -1;
 
 //Cache stuff
 static uint32_t* texStamp = NULL;
 static uint32_t texPageCount = 0;
 static uint32_t texClock = 0;
 static size_t texCacheBytes = 0;
-static bool nitroSpritesAvailable = false;
 
 
 #define DS_SCREEN_WIDTH 256
@@ -53,9 +53,6 @@ static void libndsEnsureSurfaceCapacity(LibNDSRenderer *libnds, uint32_t needed)
 
 static void libndsInit(Renderer *renderer, DataWin *dataWin) {
     renderer->dataWin = dataWin;
-    texCacheBytes = 0;
-    texClock = 0;
-    nitroSpritesAvailable = false;
     Matrix4f world;
     Matrix4f_identity(&world);
     renderer->gmlMatrices[MATRIX_WORLD] = world;
@@ -69,21 +66,8 @@ static void libndsInit(Renderer *renderer, DataWin *dataWin) {
         //For each frame in the sprite w
         for (uint32_t frame = 0; frame < sprites->textureCount; frame++){
             int32_t idx = sprites->tpagIndices[frame];
-            if (idx < 0 || (uint32_t)idx >= dataWin->tpag.count)
-                continue;
             tpagToName[idx] = sprites->name;
             tpagToFrame[idx] = (int)frame;
-        }
-    }
-
-    // Backgrounds/tiles can reference TPAG entries without having a SPRT entry.
-    for (uint32_t i = 0; i < dataWin->bgnd.count; i++){
-        int32_t idx = dataWin->bgnd.backgrounds[i].tpagIndex;
-        if (idx < 0 || (uint32_t)idx >= dataWin->tpag.count)
-            continue;
-        if (!tpagToName[idx]){
-            tpagToName[idx] = dataWin->bgnd.backgrounds[i].name;
-            tpagToFrame[idx] = 0;
         }
     }
 
@@ -93,9 +77,6 @@ static void libndsInit(Renderer *renderer, DataWin *dataWin) {
     lbds->texH = calloc(dataWin->tpag.count, sizeof(int));
     texPageCount = dataWin->tpag.count;
     texStamp = calloc(texPageCount, sizeof(uint32_t));
-
-    struct stat spriteDir;
-    nitroSpritesAvailable = (stat("nitro:/sprites", &spriteDir) == 0);
 
     videoSetMode(MODE_5_2D);
     vramSetBankA(VRAM_A_MAIN_BG);
@@ -110,30 +91,6 @@ static void libndsInit(Renderer *renderer, DataWin *dataWin) {
 
 static void libndsDestroy(Renderer *renderer) {
     LibNDSRenderer *libnds = (LibNDSRenderer *)renderer;
-
-    if (libnds->texPixels) {
-        for (uint32_t i = 0; i < texPageCount; i++) {
-            free(libnds->texPixels[i]);
-        }
-    }
-
-    free(libnds->texPixels);
-    free(libnds->texW);
-    free(libnds->texH);
-    free(texStamp);
-    free((void *)tpagToName);
-    free(tpagToFrame);
-    free(backbuffer);
-
-    texStamp = NULL;
-    tpagToName = NULL;
-    tpagToFrame = NULL;
-    texPageCount = 0;
-    texCacheBytes = 0;
-    texClock = 0;
-    backbuffer = NULL;
-    framebuffer = NULL;
-
     free(libnds->surfaceWidths);
     free(libnds->surfaceHeights);
     free(libnds->surfaceExistsFlag);
@@ -174,34 +131,28 @@ static void libndsEndGUI(Renderer *renderer) {}
 
 //Load the image bin file and add it cache if not already there
 static const u16* GetPixelData(LibNDSRenderer *lbds, int32_t texturePageId, int *outW, int *outH){
-    if (outW) *outW = 0;
-    if (outH) *outH = 0;
-
-    if (!lbds || texturePageId < 0 || (uint32_t)texturePageId >= texPageCount)
-        return NULL;
-
     //Load into cache array if not there already
     if (!lbds->texPixels[texturePageId]){
-        if (!tpagToName || !tpagToFrame || !tpagToName[texturePageId])
-            return NULL;
-
         //Create path
-        char path[256];
-
+        char path[64];
+        
         //Load from nitro if there, else load from sd
-        if (nitroSpritesAvailable)
-            snprintf(path, sizeof(path), "nitro:/sprites/%s.bin", tpagToName[texturePageId]);
+        struct stat buffer;
+        if (stat("nitro:/sprites", &buffer) == 0){
+            snprintf(path, sizeof(path), "nitro:/sprites/%s.bin", tpagToName[texturePageId]); //For example nitro:/sprites/spr_maincharau.bin
+        }
         else
-            snprintf(path, sizeof(path), "sd:/NDS/butterscotch/sprites/%s.bin", tpagToName[texturePageId]);
-
+            snprintf(path, sizeof(path), "sd:/NDS/butterscotch/sprites/%s.bin", tpagToName[texturePageId]); //For example sd:/NDS/Butterscotch/sprites/spr_maincharau.bin
+        
         uint16_t* PixelData = NULL;
         int w = 0;
         int h = 0;
-        nds_load_bin_5551(path, tpagToFrame[texturePageId], &PixelData, &w, &h);
+        nds_load_bin_5551(path, tpagToFrame[texturePageId], &PixelData, &w, &h); //Load pixel data
 
         //Failed to load the sprite
-        if (!PixelData || w <= 0 || h <= 0){
-            free(PixelData);
+        if (!PixelData){
+            *outW = 0;
+            *outH = 0;
             return NULL;
         }
 
@@ -209,27 +160,24 @@ static const u16* GetPixelData(LibNDSRenderer *lbds, int32_t texturePageId, int 
         lbds->texPixels[texturePageId] = PixelData;
         lbds->texW[texturePageId] = w;
         lbds->texH[texturePageId] = h;
-        texCacheBytes += (size_t)w * (size_t)h * sizeof(uint16_t);
+        texCacheBytes += (size_t)w * h * 2;
 
         //If we're over the max amount, unload textures until we're good
-        while (texCacheBytes > (32 * 1024)){
-            int victim = -1;
+        while (texCacheBytes > (32*1024)){
+            int victim = -1; //Which entry is being killed
 
-            for (uint32_t i = 0; i < texPageCount; i++){
-                if ((int)i == texturePageId || !lbds->texPixels[i])
+            for (int i = 0; i < (int)texPageCount; i++){
+                if (i == texturePageId || !lbds->texPixels[i])
                     continue;
 
                 if (victim == -1 || texStamp[i] < texStamp[victim])
-                    victim = (int)i;
+                    victim = i;
             }
 
             if (victim == -1)
                 break;
 
-            texCacheBytes -= (size_t)lbds->texW[victim] *
-                             (size_t)lbds->texH[victim] *
-                             sizeof(uint16_t);
-
+            texCacheBytes -= (size_t)lbds->texW[victim] * lbds->texH[victim] * 2;
             free(lbds->texPixels[victim]);
             lbds->texPixels[victim] = NULL;
             lbds->texW[victim] = 0;
@@ -237,11 +185,12 @@ static const u16* GetPixelData(LibNDSRenderer *lbds, int32_t texturePageId, int 
         }
     }
 
-    texStamp[texturePageId] = ++texClock;
+    texStamp[texturePageId] = texClock++; //Mark as used
 
-    if (outW) *outW = lbds->texW[texturePageId];
-    if (outH) *outH = lbds->texH[texturePageId];
-    return lbds->texPixels[texturePageId];
+    //Return array entry
+    *outW = lbds->texW[texturePageId]; //Set the outW set in arg to the textures width
+    *outH = lbds->texH[texturePageId]; //Set the outH set in arg to the textures height
+    return lbds->texPixels[texturePageId]; //Return pixel data
 }
 
 static void libndsDrawSprite(Renderer *renderer, int32_t tpagIndex, float x, float y, float originX, float originY, float xscale, float yscale, float angleDeg, uint32_t color, float alpha) {
@@ -275,6 +224,8 @@ static void libndsDrawSprite(Renderer *renderer, int32_t tpagIndex, float x, flo
     // Compute 4 screen-space corners (tristrip Z-pattern: top-left, top-right, bottom-left, bottom-right)
     // sx0/sy0 = top-left, sx1/sy1 = top-right, sx2/sy2 = bottom-left, sx3/sy3 = bottom-right
     float sx0, sy0, sx1, sy1, sx2, sy2, sx3, sy3;
+    bool hasRotation = angleDeg != 0.0f;
+
     /*
     I'll worry about rotation later...
     if (hasRotation) {
@@ -346,100 +297,72 @@ static void libndsDrawSprite(Renderer *renderer, int32_t tpagIndex, float x, flo
         return;
     }
 
-    //Draw all pixel data from GetPixelData on screen
-    if (xscale == 0.0f || yscale == 0.0f ||
-        lbds->scaleX == 0.0f || lbds->scaleY == 0.0f)
-        return;
-
-    int drawY0 = (int)floorf(fminf(sy0, sy2));
-    int drawY1 = (int)ceilf(fmaxf(sy0, sy2));
-    int drawX0 = (int)floorf(fminf(sx0, sx1));
-    int drawX1 = (int)ceilf(fmaxf(sx0, sx1));
-
-    if (drawY0 < 0) drawY0 = 0;
-    if (drawY1 > DS_SCREEN_HEIGHT) drawY1 = DS_SCREEN_HEIGHT;
-    if (drawX0 < 0) drawX0 = 0;
-    if (drawX1 > DS_SCREEN_WIDTH) drawX1 = DS_SCREEN_WIDTH;
-
-    for (int sy = drawY0; sy < drawY1; sy++)
-    {
-        int srcY = (int)((sy - sy0) / (yscale * lbds->scaleY));
-        if (srcY < 0 || srcY >= texH)
+    //Draw all pixle data from GetPixelData on screen
+	for (int sy = sy0; sy < sy2; sy++)
+	{
+        //Don't wrap on the y
+        if (!(sy >= 0 && sy < DS_SCREEN_HEIGHT))
             continue;
 
+        //logInfo("hi\n");
+		int srcY = (int)((sy - sy0) / (yscale * lbds->scaleY));
         const u16* src = TexturePagePixels + srcY * texW;
-        u16* dst = backbuffer + sy * DS_SCREEN_WIDTH;
+		u16* dst = backbuffer + sy * DS_SCREEN_WIDTH;
 
-        for (int sx = drawX0; sx < drawX1; sx++)
-        {
-            int srcX = (int)((sx - sx0) / (xscale * lbds->scaleX));
-            if (srcX < 0 || srcX >= texW)
+		for (int sx = sx0; sx < sx1; sx++)
+		{
+            //Don't wrap on the x
+            if (!(sx >= 0 && sx < DS_SCREEN_WIDTH))
                 continue;
 
+            int srcX = (int)((sx - sx0) / (xscale * lbds->scaleX));
             u16 c = src[srcX];
-            if (c & BIT(15))
+            if (c & BIT(15))   // opaque
                 dst[sx] = c;
-        }
-    }
-
+		}
+	}
+    
     //logInfo("X: %.2f, Y: %.2f\n", x, y);
 }
 
-static void libndsDrawSpritePart(Renderer *renderer, int32_t tpagIndex, float srcOffX, float srcOffY, float srcW, float srcH, float x, float y, float xscale, float yscale, float angleDeg, float pivotX, float pivotY, uint32_t color, float alpha) {
-    LibNDSRenderer* lbds = (LibNDSRenderer*)renderer;
-    DataWin* dw = renderer->dataWin;
-    if (tpagIndex < 0 || (uint32_t)tpagIndex >= dw->tpag.count) return;
-    if (xscale == 0.0f || yscale == 0.0f || srcW <= 0.0f || srcH <= 0.0f) return;
-
-    TexturePageItem* tpag = &dw->tpag.items[tpagIndex];
-    float sourceX = srcOffX;
-    float sourceY = srcOffY;
-    float maxW = (float)tpag->sourceWidth - sourceX;
-    float maxH = (float)tpag->sourceHeight - sourceY;
-    if (maxW <= 0.0f || maxH <= 0.0f) return;
-    if (srcW > maxW) srcW = maxW;
-    if (srcH > maxH) srcH = maxH;
-
-    int texW = 0, texH = 0;
-    const u16* pixels = GetPixelData(lbds, tpagIndex, &texW, &texH);
-    if (!pixels || texW <= 0 || texH <= 0) return;
-
-    float sx0 = ((x - (float)lbds->viewX) * lbds->scaleX) + lbds->offsetX;
-    float sy0 = ((y - (float)lbds->viewY) * lbds->scaleY) + lbds->offsetY;
-    float sx1 = sx0 + srcW * xscale * lbds->scaleX;
-    float sy1 = sy0 + srcH * yscale * lbds->scaleY;
-
-    int drawX0 = (int)floorf(fminf(sx0, sx1));
-    int drawX1 = (int)ceilf(fmaxf(sx0, sx1));
-    int drawY0 = (int)floorf(fminf(sy0, sy1));
-    int drawY1 = (int)ceilf(fmaxf(sy0, sy1));
-    if (drawX0 < 0) drawX0 = 0;
-    if (drawY0 < 0) drawY0 = 0;
-    if (drawX1 > DS_SCREEN_WIDTH) drawX1 = DS_SCREEN_WIDTH;
-    if (drawY1 > DS_SCREEN_HEIGHT) drawY1 = DS_SCREEN_HEIGHT;
-
-    for (int sy = drawY0; sy < drawY1; sy++){
-        int srcY = (int)(((float)sy - sy0) / (yscale * lbds->scaleY) + sourceY);
-        if (srcY < 0 || srcY >= texH) continue;
-        const u16* src = pixels + srcY * texW;
-        u16* dst = backbuffer + sy * DS_SCREEN_WIDTH;
-        for (int sx = drawX0; sx < drawX1; sx++){
-            int srcX = (int)(((float)sx - sx0) / (xscale * lbds->scaleX) + sourceX);
-            if (srcX < 0 || srcX >= texW) continue;
-            u16 c = src[srcX];
-            if (c & BIT(15)) dst[sx] = c;
-        }
-    }
-}
-
-static void libndsDrawSpritePartColor(Renderer *renderer, int32_t tpagIndex, float srcOffX, float srcOffY, float srcW, float srcH, float x, float y, float xscale, float yscale, float angleDeg, float pivotX, float pivotY, uint32_t color1, uint32_t color2, uint32_t color3, uint32_t color4, float alpha) {
-    libndsDrawSpritePart(renderer, tpagIndex, srcOffX, srcOffY, srcW, srcH, x, y, xscale, yscale, angleDeg, pivotX, pivotY, color1, alpha);
-}
+static void libndsDrawSpritePart(Renderer *renderer, int32_t tpagIndex, float srcOffX, float srcOffY, float srcW, float srcH, float x, float y, float xscale, float yscale, float angleDeg, float pivotX, float pivotY, uint32_t color, float alpha) {}
+static void libndsDrawSpritePartColor(Renderer *renderer, int32_t tpagIndex, float srcOffX, float srcOffY, float srcW, float srcH, float x, float y, float xscale, float yscale, float angleDeg, float pivotX, float pivotY, uint32_t color1, uint32_t color2, uint32_t color3, uint32_t color4, float alpha) {}
 static void libndsDrawSpritePos(Renderer *renderer, int32_t tpagIndex, float x1, float y1, float x2, float y2, float x3, float y3, float x4, float y4, float alpha) {}
 
 //Not acurate but does well enough for now (should do shading between the rect transitioning the colours)
 static void libndsDrawRectangleColor(Renderer *renderer, float x1, float y1, float x2, float y2, uint32_t color1, uint32_t color2, uint32_t color3, uint32_t color4, float alpha, bool outline){
+    LibNDSRenderer* lbds = (LibNDSRenderer*)renderer;
+
+    uint8_t r = BGR_R(color1);
+    uint8_t g = BGR_G(color1);
+    uint8_t b = BGR_B(color1);
+    uint8_t a = alpha; //alphaToGS(alpha);
+
+    float sx1 = (x1 - (float) lbds->viewX) * lbds->scaleX + lbds->offsetX;
+    float sy1 = (y1 - (float) lbds->viewY) * lbds->scaleY + lbds->offsetY;
+    float sx2 = (x2 - (float) lbds->viewX) * lbds->scaleX + lbds->offsetX;
+    float sy2 = (y2 - (float) lbds->viewY) * lbds->scaleY + lbds->offsetY;
+
+    //u64 rectColor = GS_SETREG_RGBAQ(r, g, b, a, 0x00);
+
+    //if (outline) {
+
+    //} else {
+        u16 c = RGB15(r >> 3, g >> 3, b >> 3) | BIT(15);
+        for (int yy = (int)sy1; yy < (int)sy2; yy++){
+            if (yy < 0 || yy >= DS_SCREEN_HEIGHT)
+                continue;
+
+            for (int xx = (int)sx1; xx < (int)sx2; xx++){
+                if (xx < 0 || xx >= DS_SCREEN_WIDTH)
+                    continue;
+
+                backbuffer[yy * DS_SCREEN_WIDTH + xx] = c;
+            }
+        }
+    //}
 }
+
 static void libndsDrawRectangle(Renderer *renderer, float x1, float y1, float x2, float y2, uint32_t color, float alpha, bool outline){
     libndsDrawRectangleColor(renderer, x1, y1, x2, y2, color, color, color, color, alpha, outline); //Pass to the color drawer
 }
@@ -514,64 +437,8 @@ static void libndsGpuSetFog(Renderer *renderer, bool enable, uint32_t color) {
     libnds->fogEnable = enable;
     libnds->fogColor = color;
 }
-static void libndsDrawTile(Renderer *renderer, RoomTile *tile, float offsetX, float offsetY) {
-    DataWin* dw = renderer->dataWin;
-    if (!tile) return;
-    int32_t tpagIndex = -1;
-    if (tile->useSpriteDefinition){
-        if (tile->backgroundDefinition >= 0 && (uint32_t)tile->backgroundDefinition < dw->sprt.count && dw->sprt.sprites[tile->backgroundDefinition].textureCount)
-            tpagIndex = dw->sprt.sprites[tile->backgroundDefinition].tpagIndices[0];
-    } else if (tile->backgroundDefinition >= 0 && (uint32_t)tile->backgroundDefinition < dw->bgnd.count){
-        tpagIndex = dw->bgnd.backgrounds[tile->backgroundDefinition].tpagIndex;
-    }
-    if (tpagIndex < 0 || (uint32_t)tpagIndex >= dw->tpag.count) return;
-
-    TexturePageItem* tpag = &dw->tpag.items[tpagIndex];
-    int32_t srcX = tile->sourceX;
-    int32_t srcY = tile->sourceY;
-    int32_t srcW = (int32_t)tile->width;
-    int32_t srcH = (int32_t)tile->height;
-    int32_t left = tpag->targetX;
-    int32_t top = tpag->targetY;
-    int32_t right = left + tpag->sourceWidth;
-    int32_t bottom = top + tpag->sourceHeight;
-    float drawX = (float)tile->x + offsetX;
-    float drawY = (float)tile->y + offsetY;
-
-    if (srcX < left){ int32_t clip = left - srcX; drawX += (float)clip * tile->scaleX; srcW -= clip; srcX = left; }
-    if (srcY < top){ int32_t clip = top - srcY; drawY += (float)clip * tile->scaleY; srcH -= clip; srcY = top; }
-    if (srcX + srcW > right) srcW = right - srcX;
-    if (srcY + srcH > bottom) srcH = bottom - srcY;
-    if (srcW <= 0 || srcH <= 0) return;
-
-    libndsDrawSpritePart(renderer, tpagIndex, (float)(srcX - left), (float)(srcY - top), (float)srcW, (float)srcH, drawX, drawY, tile->scaleX, tile->scaleY, 0.0f, 0.0f, 0.0f, tile->color, tile->alpha);
-}
-
-static void libndsDrawSpriteTiled(Renderer *renderer, int32_t tpagIndex, float originX, float originY, float x, float y, float xscale, float yscale, bool tileX, bool tileY, float roomW, float roomH, uint32_t color, float alpha) {
-    DataWin* dw = renderer->dataWin;
-    if (tpagIndex < 0 || (uint32_t)tpagIndex >= dw->tpag.count) return;
-    TexturePageItem* tpag = &dw->tpag.items[tpagIndex];
-    float w = (float)tpag->sourceWidth;
-    float h = (float)tpag->sourceHeight;
-    if (w <= 0.0f || h <= 0.0f || xscale == 0.0f || yscale == 0.0f) return;
-
-    float startX = x - originX * xscale;
-    float startY = y - originY * yscale;
-    float endX = startX + roomW;
-    float endY = startY + roomH;
-    for (float py = startY; tileY ? py < endY : py < startY + h * yscale; py += h * yscale){
-        for (float px = startX; tileX ? px < endX : px < startX + w * xscale; px += w * xscale){
-            float drawW = w * xscale;
-            float drawH = h * yscale;
-            if (tileX && px + drawW > endX) drawW = endX - px;
-            if (tileY && py + drawH > endY) drawH = endY - py;
-            if (drawW <= 0.0f || drawH <= 0.0f) continue;
-            libndsDrawSpritePart(renderer, tpagIndex, 0.0f, 0.0f, tileX ? drawW / xscale : w, tileY ? drawH / yscale : h, px, py, xscale, yscale, 0.0f, 0.0f, 0.0f, color, alpha);
-            if (!tileX) break;
-        }
-        if (!tileY) break;
-    }
-}
+static void libndsDrawTile(Renderer *renderer, RoomTile *tile, float offsetX, float offsetY) {}
+static void libndsDrawSpriteTiled(Renderer *renderer, int32_t tpagIndex, float originX, float originY, float x, float y, float xscale, float yscale, bool tileX, bool tileY, float roomW, float roomH, uint32_t color, float alpha) {}
 
 static int32_t libndsCreateSurface(Renderer *renderer, int32_t width, int32_t height) {
     LibNDSRenderer *libnds = (LibNDSRenderer *)renderer;
@@ -627,10 +494,7 @@ static void libndsSurfaceCopy(Renderer *renderer, int32_t destSurfaceID, int32_t
 static bool libndsSurfaceGetPixels(Renderer *renderer, int32_t surfaceID, uint8_t *outRGBA) {
     return false;
 }
-static void libndsDrawTiledPart(Renderer *renderer, int32_t tpagIndex, int32_t srcX, int32_t srcY, int32_t srcW, int32_t srcH, float dstX, float dstY, float dstW, float dstH, uint32_t color, float alpha) {
-    if (srcW <= 0 || srcH <= 0 || dstW <= 0.0f || dstH <= 0.0f) return;
-    libndsDrawSpritePart(renderer, tpagIndex, (float)srcX, (float)srcY, (float)srcW, (float)srcH, dstX, dstY, dstW / (float)srcW, dstH / (float)srcH, 0.0f, 0.0f, 0.0f, color, alpha);
-}
+static void libndsDrawTiledPart(Renderer *renderer, int32_t tpagIndex, int32_t srcX, int32_t srcY, int32_t srcW, int32_t srcH, float dstX, float dstY, float dstW, float dstH, uint32_t color, float alpha) {}
 
 static void libndsGpuSetShader(Renderer *renderer, int32_t shaderIndex) {
     renderer->currentShader = shaderIndex;

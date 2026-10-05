@@ -73,10 +73,6 @@
 #include "vita_textures.h"
 #endif
 
-#ifdef PLATFORM_NDS
-#include "libnds_input.h"
-#endif
-
 enum GraphicsAPI gfx;
 
 #if defined(ENABLE_LEGACY_GL) || defined(ENABLE_MODERN_GL)

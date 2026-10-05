@@ -7,6 +7,7 @@ just run make in the root and if you have devkitpro correctly setup, compile fin
 
 ## Current progress
 - Undertale boots and runs up until the name select
+- Force skipping forward in undertale overworld runs fullspeed (battles 1-2 fps)
 - Inputs
 - Basic sprite renderer
 - Pre-processer works
@@ -15,6 +16,6 @@ just run make in the root and if you have devkitpro correctly setup, compile fin
 - ~~Get undertale booting~~ ✔
 - ~~Get undertale to the first room (currently gets stuck at "Loaded "UNDERTALE")~~ ✔
 - ~~Create a pre-processer (currently you have to dump each texture page yourself via utmt)~~ ✔
-- Write/finish the full ndslib render backend
-- Get deltarune booting (fails with due to i think lazycode?)
+- finish the ndslib render backend
+- Get deltarune bootin
 - Write the full ndslib audio backend

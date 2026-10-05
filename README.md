@@ -5,6 +5,9 @@ Theres a 80% chance this isn't getting finished, just doing this more so for fun
 This project use's makefiles because I HATE CMAKE WITH EVERY CELL OF MY BODY<br>
 just run make in the root and if you have devkitpro correctly setup, compile fine!
 
+put the data.win and pre-processed sprites into:
+sd:/NDS/butterscotch/
+
 ## Current progress
 - UNDERTALE boots and runs fails something at the first froggit when toriel appears
 - Force skipping forward in undertale overworld runs fullspeed (battles 1-2 fps)

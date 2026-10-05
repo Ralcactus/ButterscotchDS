@@ -2622,9 +2622,8 @@ static void resolveExternalTextures(BinaryReader* reader, DataWin* dw) {
     if (!dw->tginOffset || !dw->txtr.textures) return;
 
     BinaryReader fileReader;
-    BinaryReader* reader = mainReader;
-    if (mainReader->buffer != nullptr && (dw->tginOffset < mainReader->bufferBase || dw->tginOffset >= mainReader->bufferBase + mainReader->bufferSize)) {
-        fileReader = BinaryReader_create(mainReader->file, mainReader->fileSize);
+    if (reader->buffer != nullptr && (dw->tginOffset < reader->bufferBase || dw->tginOffset >= reader->bufferBase + reader->bufferSize)) {
+        fileReader = BinaryReader_create(reader->file, reader->fileSize);
         reader = &fileReader;
     }
 

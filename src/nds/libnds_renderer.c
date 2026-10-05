@@ -21,6 +21,13 @@ static const char** tpagToName = NULL;
 static int* tpagToFrame = NULL;
 static int lastTexturePageId = -1;
 
+//Cache stuff
+static uint32_t* texStamp = NULL;
+static uint32_t texPageCount = 0;
+static uint32_t texClock = 0;
+static size_t texCacheBytes = 0;
+
+
 #define DS_SCREEN_WIDTH 256
 #define DS_SCREEN_HEIGHT 192
 
@@ -67,6 +74,8 @@ static void libndsInit(Renderer *renderer, DataWin *dataWin) {
     lbds->texPixels = calloc(dataWin->tpag.count, sizeof(uint16_t*));
     lbds->texW = calloc(dataWin->tpag.count, sizeof(int));
     lbds->texH = calloc(dataWin->tpag.count, sizeof(int));
+    texPageCount = dataWin->tpag.count;
+    texStamp = calloc(texPageCount, sizeof(uint32_t));
 
     videoSetMode(MODE_5_2D);
     vramSetBankA(VRAM_A_MAIN_BG);
@@ -119,34 +128,55 @@ static void libndsBeginGUI(Renderer *renderer, int32_t guiW, int32_t guiH, int32
 static void libndsSetGuiProjection(Renderer *renderer, int32_t guiW, int32_t guiH, int32_t portW, int32_t portH, bool renderingToUserSurface) {}
 static void libndsEndGUI(Renderer *renderer) {}
 
-//Get a texture pages png data and load the pixel data
+//Load the image bin file and add it cache if not already there
 static const u16* GetPixelData(LibNDSRenderer *lbds, int32_t texturePageId, int *outW, int *outH){
     //Load into cache array if not there already
     if (!lbds->texPixels[texturePageId]){
-        if (lastTexturePageId != -1 && lastTexturePageId != texturePageId){
-            if (lbds->texPixels[lastTexturePageId]){
-                free(lbds->texPixels[lastTexturePageId]);
-                lbds->texPixels[lastTexturePageId] = NULL;
-                lbds->texW[lastTexturePageId] = 0;
-                lbds->texH[lastTexturePageId] = 0;
-            }
-        }
-
         //Create path
         char path[64];
         snprintf(path, sizeof(path), "nitro:/sprites/%s.bin", tpagToName[texturePageId]); //For example nitro:/sprites/spr_maincharau.bin
-        
         uint16_t* PixelData = NULL;
         int w = 0;
         int h = 0;
         nds_load_bin_5551(path, tpagToFrame[texturePageId], &PixelData, &w, &h); //Load pixel data
 
+        //Failed to load the sprite
+        if (!PixelData){
+            *outW = 0;
+            *outH = 0;
+            return NULL;
+        }
+
         //Add to cache
         lbds->texPixels[texturePageId] = PixelData;
         lbds->texW[texturePageId] = w;
         lbds->texH[texturePageId] = h;
-        lastTexturePageId = texturePageId;
+        texCacheBytes += (size_t)w * h * 2;
+
+        //If we're over the max amount, unload textures until we're good
+        while (texCacheBytes > (64*1024)){
+            int victim = -1; //Which entry is being killed
+
+            for (int i = 0; i < (int)texPageCount; i++){
+                if (i == texturePageId || !lbds->texPixels[i])
+                    continue;
+
+                if (victim == -1 || texStamp[i] < texStamp[victim])
+                    victim = i;
+            }
+
+            if (victim == -1)
+                break;
+
+            texCacheBytes -= (size_t)lbds->texW[victim] * lbds->texH[victim] * 2;
+            free(lbds->texPixels[victim]);
+            lbds->texPixels[victim] = NULL;
+            lbds->texW[victim] = 0;
+            lbds->texH[victim] = 0;
+        }
     }
+
+    texStamp[texturePageId] = texClock++; //Mark as used
 
     //Return array entry
     *outW = lbds->texW[texturePageId]; //Set the outW set in arg to the textures width
@@ -246,8 +276,6 @@ static void libndsDrawSprite(Renderer *renderer, int32_t tpagIndex, float x, flo
     float maxSY = fmaxf(fmaxf(sy0, sy1), fmaxf(sy2, sy3));
     if (maxSX < 0.0f || minSX > DS_SCREEN_WIDTH || maxSY < 0.0f || minSY > DS_SCREEN_HEIGHT)
         return;
-    
-    
     
     //Get texture page pixel data
     int texW = 0;

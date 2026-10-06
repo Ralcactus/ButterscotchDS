@@ -20,7 +20,10 @@ static u16* framebuffer = NULL;   // VRAM
 static u16* backbuffer  = NULL;   // main RAM
 static const char** tpagToName = NULL;
 static int* tpagToFrame = NULL;
-static int lastTexturePageId = -1;
+
+// Text console shown on the top screen (main engine, layer 0)
+static PrintConsole topConsole;
+static u16 textMap[32 * 24];   // this frame's text, copied to VRAM after vblank
 
 //Cache stuff
 static uint32_t* texStamp = NULL;
@@ -80,12 +83,16 @@ static void libndsInit(Renderer *renderer, DataWin *dataWin) {
 
     videoSetMode(MODE_5_2D);
     vramSetBankA(VRAM_A_MAIN_BG);
-    int bg = bgInit(3, BgType_Bmp16, BgSize_B16_256x256, 0, 0);
+
+    // Console on layer 0: font tiles at 0 KB, tile map at 8 KB (both inside the first 16 KB of the bank)
+    consoleInit(&topConsole, 0, BgType_Text4bpp, BgSize_T_256x256, 4, 0, true, true);
+
+    // Bitmap on layer 3, starting at 16 KB (base 1) so it doesn't overwrite the console
+    int bg = bgInit(3, BgType_Bmp16, BgSize_B16_256x256, 1, 0);
     framebuffer = (u16*)bgGetGfxPtr(bg);
     backbuffer  = (u16*)malloc(256 * 192 * sizeof(u16));
     if (!backbuffer)
         exit(1);
-
     logInfo("LibNDS renderer initialized\n");
 }
 
@@ -99,13 +106,21 @@ static void libndsDestroy(Renderer *renderer) {
 
 static void libndsBeginFrame(Renderer *renderer, int32_t gameW, int32_t gameH, int32_t windowW, int32_t windowH){
     dmaFillHalfWords(RGB15(3, 3, 3) | BIT(15), backbuffer, DS_SCREEN_WIDTH * DS_SCREEN_HEIGHT * sizeof(u16));
+
+    // Clear last frame's text in RAM (tile 0 = blank); VRAM map is updated after vblank
+    memset(textMap, 0, sizeof(textMap));
 }
 
 static void libndsEndFrameInit(Renderer *renderer){}
 static void libndsEndFrameEnd(Renderer *renderer){
     DC_FlushRange(backbuffer, DS_SCREEN_WIDTH * DS_SCREEN_HEIGHT * sizeof(u16));
     dmaCopyHalfWords(3, backbuffer, framebuffer, DS_SCREEN_WIDTH * DS_SCREEN_HEIGHT * sizeof(u16));
+
     swiWaitForVBlank();
+
+    // Update the text layer right after vblank starts so it never shows half-written
+    DC_FlushRange(textMap, sizeof(textMap));
+    dmaCopyHalfWords(2, textMap, topConsole.fontBgMap, sizeof(textMap));
 }
 static void libndsBeginView(Renderer *renderer, int32_t viewX, int32_t viewY, int32_t viewW, int32_t viewH, int32_t portX, int32_t portY, int32_t portW, int32_t portH, float viewAngle){
     LibNDSRenderer* lbds = (LibNDSRenderer*)renderer;
@@ -224,10 +239,10 @@ static void libndsDrawSprite(Renderer *renderer, int32_t tpagIndex, float x, flo
     // Compute 4 screen-space corners (tristrip Z-pattern: top-left, top-right, bottom-left, bottom-right)
     // sx0/sy0 = top-left, sx1/sy1 = top-right, sx2/sy2 = bottom-left, sx3/sy3 = bottom-right
     float sx0, sy0, sx1, sy1, sx2, sy2, sx3, sy3;
-    bool hasRotation = angleDeg != 0.0f;
 
     /*
     I'll worry about rotation later...
+    bool hasRotation = angleDeg != 0.0f;
     if (hasRotation) {
         // Rotated: compute 4 transformed corners via matrix, same approach as the GLFW renderer
         // Position the cropped region within the original bounding box
@@ -336,14 +351,11 @@ static void libndsDrawRectangleColor(Renderer *renderer, float x1, float y1, flo
     uint8_t r = BGR_R(color1);
     uint8_t g = BGR_G(color1);
     uint8_t b = BGR_B(color1);
-    uint8_t a = alpha; //alphaToGS(alpha);
 
     float sx1 = (x1 - (float) lbds->viewX) * lbds->scaleX + lbds->offsetX;
     float sy1 = (y1 - (float) lbds->viewY) * lbds->scaleY + lbds->offsetY;
     float sx2 = (x2 - (float) lbds->viewX) * lbds->scaleX + lbds->offsetX;
     float sy2 = (y2 - (float) lbds->viewY) * lbds->scaleY + lbds->offsetY;
-
-    //u64 rectColor = GS_SETREG_RGBAQ(r, g, b, a, 0x00);
 
     //if (outline) {
 
@@ -370,8 +382,31 @@ static void libndsDrawRectangle(Renderer *renderer, float x1, float y1, float x2
 static void libndsDrawLine(Renderer *renderer, float x1, float y1, float x2, float y2, float width, uint32_t color, float alpha) {}
 static void libndsDrawLineColor(Renderer *renderer, float x1, float y1, float x2, float y2, float width, uint32_t color1, uint32_t color2, float alpha) {}
 static void libndsDrawTriangle(Renderer *renderer, float x1, float y1, float x2, float y2, float x3, float y3, uint32_t color1, uint32_t color2, uint32_t color3, float alpha, bool outline) {}
-static void libndsDrawTextColor(Renderer *renderer, const char *text, float x, float y, float xscale, float yscale, float angleDeg, int32_t c1, int32_t c2, int32_t c3, int32_t c4, float alpha, float lineSeparation){
-    libndsDrawRectangle(renderer, x, y, x + 10, y + 10, c1, alpha, false); //Draw text as as placeholder squares
+static void libndsDrawTextColor(Renderer *renderer, const char *text, float x, float y,
+                                float xscale, float yscale, float angleDeg,
+                                int32_t c1, int32_t c2, int32_t c3, int32_t c4,
+                                float alpha, float lineSeparation) {
+    LibNDSRenderer *lbds = (LibNDSRenderer *)renderer;
+
+    int screenX = (int)((x - (float)lbds->viewX) * lbds->scaleX + lbds->offsetX);
+    int screenY = (int)((y - (float)lbds->viewY) * lbds->scaleY + lbds->offsetY);
+
+    // Skip anything off-screen (the console is 32x24 tiles of 8x8 px)
+    if (screenX < 0 || screenY < 0 || screenX >= DS_SCREEN_WIDTH || screenY >= DS_SCREEN_HEIGHT) return;
+
+    int cx = screenX / 8;
+    int cy = screenY / 8;
+    int col = cx;
+    int row = cy;
+
+    for (const char *p = text; *p; p++) {
+        if (*p == '\n') { col = cx; row++; continue; }
+        if (col >= 32) { col = cx; row++; }   // wrap back to the start column
+        if (row >= 24) break;
+        if (*p >= topConsole.font.asciiOffset)
+            textMap[row * 32 + col] = topConsole.fontCurPal | (u16)(*p - topConsole.font.asciiOffset);
+        col++;
+    }
 }
 static void libndsDrawText(Renderer *renderer, const char *text, float x, float y, float xscale, float yscale, float angleDeg, float lineSeparation){
     libndsDrawTextColor(renderer, text, x, y, xscale, yscale, angleDeg, renderer->drawColor, renderer->drawColor, renderer->drawColor, renderer->drawColor, renderer->drawAlpha, lineSeparation);

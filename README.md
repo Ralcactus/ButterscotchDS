@@ -20,3 +20,10 @@ just run make in the root and if you have devkitpro correctly setup, compile fin
 - finish the ndslib render backend
 - ~~Get deltarune booting~~ ✔
 - Write the full ndslib audio backend
+
+## Compatibility List (un-finished)
+Undertale - Loads, Flowey crashes but can be avoided if you skip their dialog fast enough and crashes with the first froggit.
+DELTARUNE Chapter 1 - Works, but vessel creation takes at minimum 35 minutes. Crashes when attempting to load save files?
+DELTARUNE Chapter 2 - Crashes on the subheadings (emulator) and crashes when leaving Kris' and Asriel's room. 
+Pizza Tower - Too big for it to read... (skips most of the important code, making it think its the wrong bytecode)
+Undertale Yellow - Crashes on trying to parse rooms?

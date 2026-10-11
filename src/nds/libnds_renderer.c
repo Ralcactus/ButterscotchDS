@@ -105,7 +105,7 @@ static void libndsDestroy(Renderer *renderer) {
 }
 
 static void libndsBeginFrame(Renderer *renderer, int32_t gameW, int32_t gameH, int32_t windowW, int32_t windowH){
-    dmaFillHalfWords(RGB15(3, 3, 3) | BIT(15), backbuffer, DS_SCREEN_WIDTH * DS_SCREEN_HEIGHT * sizeof(u16));
+    dmaFillHalfWords(RGB15(0, 0, 0) | BIT(15), backbuffer, DS_SCREEN_WIDTH * DS_SCREEN_HEIGHT * sizeof(u16));
 
     // Clear last frame's text in RAM (tile 0 = blank); VRAM map is updated after vblank
     memset(textMap, 0, sizeof(textMap));
@@ -312,6 +312,14 @@ static void libndsDrawSprite(Renderer *renderer, int32_t tpagIndex, float x, flo
         return;
     }
 
+    sx0 = (x + (0 - originX) * xscale - (float) lbds->viewX) * lbds->scaleX + lbds->offsetX;
+    sy0 = (y + (0 - originY) * yscale - (float) lbds->viewY) * lbds->scaleY + lbds->offsetY;
+    sx1 = (x + (texW - originX) * xscale - (float) lbds->viewX) * lbds->scaleX + lbds->offsetX;
+    sy2 = (y + (texH - originY) * yscale - (float) lbds->viewY) * lbds->scaleY + lbds->offsetY;
+
+    float dstW = sx1 - sx0;
+    float dstH = sy2 - sy0;
+
     //Draw all pixle data from GetPixelData on screen
 	for (int sy = sy0; sy < sy2; sy++)
 	{
@@ -320,7 +328,7 @@ static void libndsDrawSprite(Renderer *renderer, int32_t tpagIndex, float x, flo
             continue;
 
         //logInfo("hi\n");
-		int srcY = (int)((sy - sy0) / (yscale * lbds->scaleY));
+		int srcY = (int)((sy - sy0) * (float)texH / dstH);
         const u16* src = TexturePagePixels + srcY * texW;
 		u16* dst = backbuffer + sy * DS_SCREEN_WIDTH;
 
@@ -330,7 +338,7 @@ static void libndsDrawSprite(Renderer *renderer, int32_t tpagIndex, float x, flo
             if (!(sx >= 0 && sx < DS_SCREEN_WIDTH))
                 continue;
 
-            int srcX = (int)((sx - sx0) / (xscale * lbds->scaleX));
+            int srcX = (int)((sx - sx0) * (float)texW / dstW);
             u16 c = src[srcX];
             if (c & BIT(15))   // opaque
                 dst[sx] = c;

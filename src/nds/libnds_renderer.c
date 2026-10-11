@@ -83,9 +83,9 @@ static void libndsInit(Renderer *renderer, DataWin *dataWin) {
 
     videoSetMode(MODE_5_2D);
     vramSetBankA(VRAM_A_MAIN_BG);
-
-    // Console on layer 0: font tiles at 0 KB, tile map at 8 KB (both inside the first 16 KB of the bank)
+    PrintConsole *logConsole = consoleSelect(&topConsole);
     consoleInit(&topConsole, 0, BgType_Text4bpp, BgSize_T_256x256, 4, 0, true, true);
+    consoleSelect(logConsole);
 
     // Bitmap on layer 3, starting at 16 KB (base 1) so it doesn't overwrite the console
     int bg = bgInit(3, BgType_Bmp16, BgSize_B16_256x256, 1, 0);
@@ -382,29 +382,55 @@ static void libndsDrawRectangle(Renderer *renderer, float x1, float y1, float x2
 static void libndsDrawLine(Renderer *renderer, float x1, float y1, float x2, float y2, float width, uint32_t color, float alpha) {}
 static void libndsDrawLineColor(Renderer *renderer, float x1, float y1, float x2, float y2, float width, uint32_t color1, uint32_t color2, float alpha) {}
 static void libndsDrawTriangle(Renderer *renderer, float x1, float y1, float x2, float y2, float x3, float y3, uint32_t color1, uint32_t color2, uint32_t color3, float alpha, bool outline) {}
-static void libndsDrawTextColor(Renderer *renderer, const char *text, float x, float y,
-                                float xscale, float yscale, float angleDeg,
-                                int32_t c1, int32_t c2, int32_t c3, int32_t c4,
-                                float alpha, float lineSeparation) {
+
+static u16 textPal[16];
+static int textPalCount = 1;
+
+static void libndsDrawTextColor(Renderer *renderer, const char *text, float x, float y, float xscale, float yscale, float angleDeg, int32_t c1, int32_t c2, int32_t c3, int32_t c4, float alpha, float lineSeparation){
     LibNDSRenderer *lbds = (LibNDSRenderer *)renderer;
 
     int screenX = (int)((x - (float)lbds->viewX) * lbds->scaleX + lbds->offsetX);
     int screenY = (int)((y - (float)lbds->viewY) * lbds->scaleY + lbds->offsetY);
 
     // Skip anything off-screen (the console is 32x24 tiles of 8x8 px)
-    if (screenX < 0 || screenY < 0 || screenX >= DS_SCREEN_WIDTH || screenY >= DS_SCREEN_HEIGHT) return;
+    if (screenX < 0 || screenY < 0 || screenX >= DS_SCREEN_WIDTH || screenY >= DS_SCREEN_HEIGHT)
+        return;
 
     int cx = screenX / 8;
     int cy = screenY / 8;
     int col = cx;
     int row = cy;
 
-    for (const char *p = text; *p; p++) {
-        if (*p == '\n') { col = cx; row++; continue; }
+    u16 colour = RGB15(BGR_R(c1) >> 3, BGR_G(c1) >> 3, BGR_B(c1) >> 3);
+    int slot = -1;
+
+    for (int i = 1; i < textPalCount; i++){
+        if (textPal[i] == colour){
+            slot = i;
+            break;
+        }
+    }
+
+    if (slot == -1){
+        static int next = 1;
+        if (textPalCount < 16)
+            slot = textPalCount++;
+        else{
+            slot = next;
+            next = (next % 15) + 1;
+        }
+        textPal[slot] = colour;
+        BG_PALETTE[slot * 16 + 15] = colour;
+    }
+
+    u16 pal = (u16)(slot << 12);
+
+    for (const char *p = text; *p; p++){
+        if (*p == '\n'){ col = cx; row++; continue; }
         if (col >= 32) { col = cx; row++; }   // wrap back to the start column
         if (row >= 24) break;
         if (*p >= topConsole.font.asciiOffset)
-            textMap[row * 32 + col] = topConsole.fontCurPal | (u16)(*p - topConsole.font.asciiOffset);
+            textMap[row * 32 + col] = pal | (u16)(*p - topConsole.font.asciiOffset);
         col++;
     }
 }

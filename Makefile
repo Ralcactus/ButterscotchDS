@@ -12,11 +12,15 @@ include $(DEVKITARM)/ds_rules
 #---------------------------------------------------------------------------------
 TARGET      := ButterscotchDS
 BUILD       := build_nds
-SOURCES     := src src/debug_font src/image src/video src/nds \
-               vendor/bzip2 vendor/miniz vendor/md5 vendor/sha1 vendor/base64
+SOURCES     := src src/debug_font src/image src/video src/nds vendor/box2d/src \
+               vendor/bzip2 vendor/miniz vendor/md5 vendor/sha1 vendor/base64 \
+               src/physics
+
 INCLUDES    := . src src/image src/debug_font src/video src/nds \
                vendor/stb/ds vendor/stb/image vendor/stb/vorbis \
-               vendor/md5 vendor/sha1 vendor/base64 vendor/bzip2 vendor/miniz
+               vendor/md5 vendor/sha1 vendor/base64 vendor/bzip2 vendor/miniz \
+			   vendor/box2d/include
+
 DATA        :=
 NITRODATA   := nitrofs
 
@@ -37,7 +41,10 @@ DEFINES  := -DARM9 -D__NDS__ \
             -DENABLE_WAD14 -DENABLE_WAD16 -DENABLE_WAD17 \
             -DENABLE_LIBNDS_RENDERER \
             -DMINIZ_NO_ARCHIVE_APIS -DMINIZ_NO_STDIO \
-            -DBUTTERSCOTCH_VIDEO_NULL
+            -DBUTTERSCOTCH_VIDEO_NULL \
+            -DENABLE_PHYSICS \
+            -DBOX2D_DISABLE_SIMD \
+            -DB2_SINGLE_THREADED \
 
 # Profiler/tracing/stub-log defines are left off (they're opt-out in the main Makefile)
 
@@ -59,7 +66,7 @@ export VPATH  := $(foreach dir,$(SOURCES),$(CURDIR)/$(dir)) \
                  $(foreach dir,$(DATA),$(CURDIR)/$(dir))
 export DEPSDIR := $(CURDIR)/$(BUILD)
 
-CFILES   := $(foreach dir,$(SOURCES),$(notdir $(wildcard $(dir)/*.c)))
+CFILES   := $(filter-out timer.c,$(foreach dir,$(SOURCES),$(notdir $(wildcard $(dir)/*.c))))
 CPPFILES := $(foreach dir,$(SOURCES),$(notdir $(wildcard $(dir)/*.cpp)))
 SFILES   := $(foreach dir,$(SOURCES),$(notdir $(wildcard $(dir)/*.s)))
 BINFILES := $(foreach dir,$(DATA),$(notdir $(wildcard $(dir)/*.*)))

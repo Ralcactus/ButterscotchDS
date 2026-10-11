@@ -1,4 +1,3 @@
-
 import os
 import sys
 import shutil
@@ -63,6 +62,9 @@ if (Directory.Exists(temp))
 
 Directory.CreateDirectory(temp);
 
+string spritesDir = Path.Combine(temp, "sprites");
+Directory.CreateDirectory(spritesDir);
+
 using (TextureWorker worker = new TextureWorker())
 {
     for (int s = 0; s < Data.Sprites.Count; s++)
@@ -78,8 +80,8 @@ using (TextureWorker worker = new TextureWorker())
             name = "sprite_" + s;
 
         string dir = Path.Combine(
-            temp,
-            s.ToString("D6")
+            spritesDir,
+            "sprite_" + s.ToString("D6")
         );
 
         Directory.CreateDirectory(dir);
@@ -108,6 +110,44 @@ using (TextureWorker worker = new TextureWorker())
                 output
             );
         }
+    }
+
+    for (int t = 0; t < Data.Backgrounds.Count; t++)
+    {
+        var tileset = Data.Backgrounds[t];
+
+        if (tileset == null)
+            continue;
+
+        if (tileset.Texture == null)
+            continue;
+
+        string name = tileset.Name?.Content;
+
+        if (String.IsNullOrEmpty(name))
+            name = "tileset_" + t;
+
+        string dir = Path.Combine(
+            spritesDir,
+            "tileset_" + t.ToString("D6")
+        );
+
+        Directory.CreateDirectory(dir);
+
+        File.WriteAllText(
+            Path.Combine(dir, "name.txt"),
+            name
+        );
+
+        string output = Path.Combine(
+            dir,
+            "000000.png"
+        );
+
+        worker.ExportAsPNG(
+            tileset.Texture,
+            output
+        );
     }
 }
 '''
@@ -165,13 +205,12 @@ def make_sprite_bin(folder, output):
     if not frames:
         return False
 
-    # use the first frame size for the sprite header
     width = frames[0]["width"]
     height = frames[0]["height"]
 
     with open(output, "wb") as f:
 
-        # dsbs header
+        # DSBS header
         f.write(struct.pack(
             "<4sHHHH",
             MAGIC,
@@ -191,7 +230,7 @@ def make_sprite_bin(folder, output):
 
         f.write(name_bytes)
 
-        # each frame
+        # frames
         for frame in frames:
 
             pixels = frame["pixels"]
@@ -211,6 +250,7 @@ def make_sprite_bin(folder, output):
 def main():
 
     print("GAME MAKER TO BIN :3")
+    print()
 
     data_win = get_data_win()
 
@@ -234,6 +274,7 @@ def main():
         input()
         return
 
+    # EVERYTHING goes into sprites
     output_dir = os.path.join(
         os.path.dirname(data_win),
         "sprites"
@@ -280,7 +321,6 @@ def main():
             print("error: undertalemodtool failed")
             print()
 
-            # only show the useful part
             lines = result.stdout.splitlines()
 
             for line in lines:
@@ -292,7 +332,8 @@ def main():
 
         exported = os.path.join(
             temp_dir,
-            "exported"
+            "exported",
+            "sprites"
         )
 
         if not os.path.isdir(exported):
@@ -325,19 +366,23 @@ def main():
                     "r",
                     encoding="utf-8"
                 ) as f:
+
                     name = clean_name(
                         f.read().strip()
                     )
 
             else:
-                name = "sprite_" + folder
+
+                name = clean_name(
+                    folder
+                )
 
             output = os.path.join(
                 output_dir,
                 name + ".bin"
             )
 
-            # dont overwrite another sprite with the same name
+            # prevent duplicate names
             if os.path.exists(output):
 
                 n = 2
@@ -363,19 +408,22 @@ def main():
                 count += 1
 
                 frames += len([
-                    x for x in os.listdir(folder_path)
+                    x
+                    for x in os.listdir(folder_path)
                     if x.lower().endswith(".png")
                 ])
 
         print()
         print("done :3")
-        print("sprites:", count)
+        print()
+        print("sprites + tilesets:", count)
         print("frames:", frames)
         print()
         print("saved to:")
         print(output_dir)
 
     finally:
+
         shutil.rmtree(
             temp_dir,
             ignore_errors=True
@@ -387,4 +435,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

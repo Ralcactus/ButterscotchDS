@@ -509,7 +509,7 @@ void VMBuiltins_checkIfBuiltinVarTableIsSorted(void) {
 #endif
 // Indicates when a variable should be routed via structGet/structSet instead of resolving it using the default path.
 // See GameMaker-HTML5's "g_instance_names" table for reference (GameMaker-HTML5/scripts/yyVariable.js),
-static bool isInstanceScopedBuiltinVar(int16_t builtinVarId) {
+bool VMBuiltins_isInstanceScopedBuiltinVar(int16_t builtinVarId) {
     if (builtinVarId >= PHYSICS_VARIABLE_BASE && builtinVarId < PHYSICS_VARIABLE_BASE + PHY_VARIABLE_COUNT) return true;
     switch (builtinVarId) {
         case BUILTIN_VAR_X:
@@ -612,7 +612,7 @@ RValue VMBuiltins_getVariable(VMContext* ctx, Instance* inst, int16_t builtinVar
     requireNotNull(runner);
 
     // Structs: instance builtins are ordinary members.
-    if (inst != nullptr && inst->objectIndex == STRUCT_OBJECT_INDEX && isInstanceScopedBuiltinVar(builtinVarId)) {
+    if (inst != nullptr && inst->objectIndex == STRUCT_OBJECT_INDEX && VMBuiltins_isInstanceScopedBuiltinVar(builtinVarId)) {
         return VM_structGetVariableByVarName(ctx, inst, name, arrayIndex);
     }
 
@@ -1325,7 +1325,7 @@ void VMBuiltins_setVariable(VMContext* ctx, Instance* inst, int16_t builtinVarId
     requireNotNull(runner);
 
     // Structs: instance builtins are ordinary members.
-    if (inst != nullptr && inst->objectIndex == STRUCT_OBJECT_INDEX && isInstanceScopedBuiltinVar(builtinVarId)) {
+    if (inst != nullptr && inst->objectIndex == STRUCT_OBJECT_INDEX && VMBuiltins_isInstanceScopedBuiltinVar(builtinVarId)) {
         VM_structSet(ctx, inst, name, val, arrayIndex);
         return;
     }
@@ -4498,21 +4498,33 @@ static RValue builtin_variable_struct_exists(VMContext* ctx, RValue* args, int32
 static RValue builtin_variable_get_hash(VMContext* ctx, RValue* args, int32_t argCount) {
     REQUIRE_ARGC_AT_LEAST("variable_get_hash", 1, RValue_makeUndefined());
     if (args[0].type != RVALUE_STRING) return RValue_makeUndefined();
-    return RValue_makeInt32(VM_getOrAllocateVarID(ctx, args[0].string));
+    repeat(ctx->dataWin->vari.variableCount, i) {
+        if (strcmp(ctx->dataWin->vari.variables[i].name, args[0].string) == 0)
+            return RValue_makeInt32((int32_t) i);
+    }
+    return RValue_makeInt32(-VM_getOrAllocateVarID(ctx, args[0].string) - 1);
 }
 
 static int32_t structHashArgToVarId(VMContext* ctx, RValue hash) {
     if (hash.type == RVALUE_STRING) return hash.string != nullptr ? VM_getOrAllocateVarID(ctx, hash.string) : -1;
-    return RValue_toInt32(hash);
+    int32_t index = RValue_toInt32(hash);
+    if (index < 0) return -(index + 1);
+    if ((uint32_t) index >= ctx->dataWin->vari.variableCount) return -1;
+    return VM_getOrAllocateVarID(ctx, ctx->dataWin->vari.variables[index].name);
 }
 
 // struct_get_from_hash
 static RValue builtin_struct_get_from_hash(VMContext* ctx, RValue* args, int32_t argCount) {
     REQUIRE_ARGC_AT_LEAST("struct_get_from_hash", 2, RValue_makeUndefined());
-    if (args[0].type != RVALUE_STRUCT || args[0].structInst == nullptr) return RValue_makeUndefined();
     int32_t varId = structHashArgToVarId(ctx, args[1]);
     if (varId < 0) return RValue_makeUndefined();
-    return RValue_makeIndependent(VM_structGetVariableByVarId(args[0].structInst, varId, -1));
+    const char* name = VM_getVariableNameByVarId(ctx, varId);
+    if (name == nullptr) return RValue_makeUndefined();
+    if (args[0].type == RVALUE_STRUCT && args[0].structInst == nullptr) return RValue_makeUndefined();
+    Instance* inst = resolveInstanceValue(ctx->runner, args[0]);
+    if (inst != nullptr)
+        return variableInstanceGetOn(ctx, inst, name, "struct_get_from_hash");
+    return variableScopedGet(ctx, RValue_toInt32(args[0]), name, false, "struct_get_from_hash");
 }
 
 // struct_set_from_hash
@@ -9242,6 +9254,42 @@ static RValue builtin_window_get_height(VMContext* ctx, MAYBE_UNUSED RValue* arg
         }
     }
     return RValue_makeReal((GMLReal) ctx->dataWin->gen8.defaultWindowHeight);
+}
+
+static RValue builtin_window_get_x(VMContext* ctx, MAYBE_UNUSED RValue* args, MAYBE_UNUSED int32_t argCount) {
+    Runner* runner = ctx->runner;
+    if (runner != nullptr && runner->getWindowPosition != nullptr) {
+        int32_t x = 0;
+        int32_t y = 0;
+        if (runner->getWindowPosition(&x, &y)) {
+            return RValue_makeReal((GMLReal) x);
+        }
+    }
+    return RValue_makeReal((GMLReal)0);
+}
+
+static RValue builtin_window_get_y(VMContext* ctx, MAYBE_UNUSED RValue* args, MAYBE_UNUSED int32_t argCount) {
+    Runner* runner = ctx->runner;
+    if (runner != nullptr && runner->getWindowPosition != nullptr) {
+        int32_t x = 0;
+        int32_t y = 0;
+        if (runner->getWindowPosition(&x, &y)) {
+            return RValue_makeReal((GMLReal) y);
+        }
+    }
+    return RValue_makeReal((GMLReal)0);
+}
+
+static RValue builtin_window_set_position(VMContext* ctx, RValue* args, MAYBE_UNUSED int32_t argCount) {
+    REQUIRE_ARGC_AT_LEAST("window_set_position", 2, RValue_makeUndefined());
+    int32_t x = RValue_toInt32(args[0]);
+    int32_t y = RValue_toInt32(args[1]);
+    
+    Runner* runner = ctx->runner;
+    if (runner != nullptr && runner->setWindowPosition != nullptr) {
+        runner->setWindowPosition(x, y);
+    }
+    return RValue_makeUndefined();
 }
 
 static RValue builtin_window_set_size(VMContext* ctx, RValue* args, MAYBE_UNUSED int32_t argCount) {
@@ -23555,6 +23603,9 @@ void VMBuiltins_registerAll(VMContext* ctx) {
     VM_registerBuiltin(ctx, "window_get_caption", builtin_window_get_caption);
     VM_registerBuiltin(ctx, "window_get_width", builtin_window_get_width);
     VM_registerBuiltin(ctx, "window_get_height", builtin_window_get_height);
+    VM_registerBuiltin(ctx, "window_get_x", builtin_window_get_x);
+    VM_registerBuiltin(ctx, "window_get_y", builtin_window_get_y);
+    VM_registerBuiltin(ctx, "window_set_position", builtin_window_set_position);
     VM_registerBuiltin(ctx, "window_set_size", builtin_window_set_size);
     VM_registerBuiltin(ctx, "window_center", builtin_window_center);
     VM_registerBuiltin(ctx, "window_has_focus", builtin_window_has_focus);
